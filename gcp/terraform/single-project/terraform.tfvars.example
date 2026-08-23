@@ -1,0 +1,26 @@
+# Example tfvars for the single-project "Deploy to GCP" module.
+#
+# In production the ARMO backend GENERATES this file with the tenant's values
+# filled in (the GCP analogue of AWS's GenerateCADRStackLink). Copy to
+# terraform.tfvars and edit for a manual/test run.
+#
+# ⚠️ Do NOT commit a real access_key. Prefer `export TF_VAR_access_key=...` over putting
+#    it in this file. terraform.tfvars is git-ignored (see .gitignore).
+
+# ---- required ----------------------------------------------------------------
+project_id      = "my-gcp-project"                       # project to onboard
+customer_guid   = "00000000-0000-0000-0000-000000000000" # ARMO tenant GUID
+access_key         = "REPLACE_ME"                            # per-tenant key (or use TF_VAR_access_key)
+collector_image_ref = "quay.io/armosec/cdr-gcp:v0.1.0"        # G4/SUB-7813 image ref
+
+# ---- optional (sensible defaults) -------------------------------------------
+region            = "us-central1"
+# alert_export_url      = "https://report.armo.cloud/cloud/v1/cdrAlert"
+# rule_endpoint_url = "https://report.armo.cloud/cloud/v1/cdrRules"
+# min_instances     = 1
+# name_prefix       = "armo-cdr"
+
+# ---- connectivity check (D2) ------------------------------------------------
+# run_connectivity_check              = true
+# connectivity_check_attempts         = 8
+# connectivity_check_interval_seconds = 30
