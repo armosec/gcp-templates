@@ -2,14 +2,15 @@
 # =============================================================================
 # Offboard a single-project CDR deployment, in the HLD §4.5 removal order:
 #
-#   1. delete the sink FIRST            (stops new logs flowing)
-#   2. delete the push subscription     (drain — Pub/Sub discards in-flight msgs)
-#   3. wait for sink deletion to propagate BEFORE removing the topic
-#      (deleting the topic too soon makes Cloud Logging email the project owner an
-#       alarming "topic_not_found — logs are not being routed" notice)
-#   4. delete topics (main + DLQ) + DLQ subscription
-#   5. delete Cloud Run + service accounts
-#   6. delete the access-key secret
+#   1. delete the sink(s) FIRST         (stops new logs flowing), and confirm they are gone
+#   2. DRAIN: wait with the collector + push subscription STILL UP, so the in-flight backlog is
+#      processed rather than discarded — this same wait also lets sink deletion propagate
+#   3. delete the push subscription     (backlog now drained)
+#   4. delete the Cloud Run collector + its service accounts
+#   5. delete the access-key secret
+#   6. delete topics (main + DLQ) + DLQ subscription LAST — only after sink deletion has propagated,
+#      or deleting the topic too soon makes Cloud Logging email the project owner an alarming
+#      "topic_not_found — logs are not being routed" notice
 #   7. revoke the per-tenant API key  ← done in the ARMO backend, NOT here
 #   8. mark the cloud_account / CADR feature removed ← ARMO backend
 #
@@ -121,10 +122,19 @@ done
 # publishing into a topic we are about to delete, which is exactly what triggers
 # Google's alarming "topic_not_found" email to the project owner.
 for scope in "${SINK_SCOPES[@]}"; do
+  confirmed=false
   for i in $(seq 1 15); do
-    gcloud logging sinks describe "$SINK" "$scope" >/dev/null 2>&1 || { echo "  sink at $scope confirmed gone"; break; }
+    if ! gcloud logging sinks describe "$SINK" "$scope" >/dev/null 2>&1; then
+      echo "  sink at $scope confirmed gone"; confirmed=true; break
+    fi
     sleep 2
   done
+  # If a sink survives the retries, ABORT before the drain + topic deletion: proceeding is exactly the
+  # "topic_not_found" owner-email scenario this ordering exists to avoid. Re-run once the sink is gone.
+  if [ "$confirmed" != true ]; then
+    echo "ERROR: sink $SINK at $scope is still present after ~30s; aborting before topic deletion to avoid the 'topic_not_found' owner email." >&2
+    exit 1
+  fi
 done
 
 echo "== 2. DRAIN: wait ${SINK_DRAIN_SECONDS}s with the collector + subscription STILL UP =="

@@ -24,6 +24,28 @@
 # =============================================================================
 set -euo pipefail
 
+# create_idempotent "<human name>" <gcloud create command...>
+# Runs a resource-creation command idempotently: it tolerates an "already exists" error (re-runs are
+# safe) but ABORTS on any other failure — expired auth, permission denied, quota, API not enabled.
+# This replaces the older `<cmd> 2>/dev/null || echo "... exists"` pattern, which swallowed EVERY
+# error uniformly: under `set -euo pipefail` the `||` stopped the script aborting on a genuine
+# failure, so it could print a false "exists" and run on to a "Pipe is up" success banner with a
+# resource actually missing.
+create_idempotent() {
+  local what="$1"; shift
+  local err
+  if err="$("$@" 2>&1)"; then
+    return 0
+  fi
+  if printf '%s' "$err" | grep -qiE 'already exists|ALREADY_EXISTS'; then
+    echo "  $what exists"
+    return 0
+  fi
+  echo "ERROR creating ${what}:" >&2
+  printf '%s\n' "$err" >&2
+  return 1
+}
+
 # ---- G0 contract inputs (env or flags) --------------------------------------
 PROJECT_ID="${PROJECT_ID:-}"
 REGION="${REGION:-us-central1}"
@@ -116,12 +138,12 @@ RUNTIME_SA_EMAIL="${RUNTIME_SA}@${PROJECT_ID}.iam.gserviceaccount.com"
 PUSHER_SA_EMAIL="${PUSHER_SA}@${PROJECT_ID}.iam.gserviceaccount.com"
 
 echo "== 1. Pub/Sub topics (main + DLQ) =="
-gcloud pubsub topics create "$TOPIC"     --project "$PROJECT_ID" 2>/dev/null || echo "  topic $TOPIC exists"
-gcloud pubsub topics create "$DLQ_TOPIC" --project "$PROJECT_ID" 2>/dev/null || echo "  topic $DLQ_TOPIC exists"
+create_idempotent "topic $TOPIC"     gcloud pubsub topics create "$TOPIC"     --project "$PROJECT_ID"
+create_idempotent "topic $DLQ_TOPIC" gcloud pubsub topics create "$DLQ_TOPIC" --project "$PROJECT_ID"
 
 echo "== 2. Service accounts (least privilege) =="
-gcloud iam service-accounts create "$RUNTIME_SA" --display-name "ARMO CDR collector runtime" --project "$PROJECT_ID" 2>/dev/null || echo "  $RUNTIME_SA exists"
-gcloud iam service-accounts create "$PUSHER_SA"  --display-name "ARMO CDR Pub/Sub push (OIDC)" --project "$PROJECT_ID" 2>/dev/null || echo "  $PUSHER_SA exists"
+create_idempotent "$RUNTIME_SA" gcloud iam service-accounts create "$RUNTIME_SA" --display-name "ARMO CDR collector runtime" --project "$PROJECT_ID"
+create_idempotent "$PUSHER_SA"  gcloud iam service-accounts create "$PUSHER_SA"  --display-name "ARMO CDR Pub/Sub push (OIDC)" --project "$PROJECT_ID"
 # POC gotcha: a freshly-created SA is not immediately bindable (~4s). Settle.
 echo "   waiting for SAs to become bindable (POC: ~4s → 'does not exist' otherwise)"
 sleep 10
@@ -172,13 +194,13 @@ gcloud pubsub topics add-iam-policy-binding "$DLQ_TOPIC" \
 # --expiration-period=never: a DLQ sub sees no traffic by design, so the default
 # 31-day inactivity expiry would auto-delete it → DLQ topic becomes subscriber-less
 # → dead-lettered events silently discarded again.
-gcloud pubsub subscriptions create "$DLQ_SUB" --topic "$DLQ_TOPIC" \
-  --message-retention-duration 7d --expiration-period=never --project "$PROJECT_ID" 2>/dev/null || echo "  $DLQ_SUB exists"
+create_idempotent "$DLQ_SUB" gcloud pubsub subscriptions create "$DLQ_SUB" --topic "$DLQ_TOPIC" \
+  --message-retention-duration 7d --expiration-period=never --project "$PROJECT_ID"
 
 echo "== 7. OIDC push subscription (ack=60s, LOAD-BEARING retry policy, DLQ) =="
 # The retry policy is load-bearing: without it Pub/Sub burns max-delivery-attempts
 # in SECONDS and a ~30s blip permanently dead-letters real events (POC-measured).
-gcloud pubsub subscriptions create "$SUB" \
+create_idempotent "subscription $SUB" gcloud pubsub subscriptions create "$SUB" \
   --topic "$TOPIC" \
   --push-endpoint "${SERVICE_URL}/" \
   --push-auth-service-account "$PUSHER_SA_EMAIL" \
@@ -189,16 +211,16 @@ gcloud pubsub subscriptions create "$SUB" \
   --dead-letter-topic "$DLQ_TOPIC" \
   --max-delivery-attempts 20 \
   --expiration-period=never \
-  --project "$PROJECT_ID" 2>/dev/null || echo "  subscription $SUB exists"
+  --project "$PROJECT_ID"
 gcloud pubsub subscriptions add-iam-policy-binding "$SUB" \
   --member "$PUBSUB_AGENT" --role roles/pubsub.subscriber --project "$PROJECT_ID" >/dev/null
 
 echo "== 8. Log Router sink (Admin Activity only) → grant writer publisher on topic =="
 # writer identity is generated AT sink creation: order is topic → sink → grant.
-gcloud logging sinks create "$SINK" \
+create_idempotent "sink $SINK" gcloud logging sinks create "$SINK" \
   "pubsub.googleapis.com/projects/${PROJECT_ID}/topics/${TOPIC}" \
   --log-filter='logName:"logs/cloudaudit.googleapis.com%2Factivity"' \
-  --project "$PROJECT_ID" 2>/dev/null || echo "  sink $SINK exists"
+  --project "$PROJECT_ID"
 WRITER="$(gcloud logging sinks describe "$SINK" --project "$PROJECT_ID" --format='value(writerIdentity)')"
 echo "   sink writer identity: $WRITER"
 gcloud pubsub topics add-iam-policy-binding "$TOPIC" \
