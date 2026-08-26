@@ -1,6 +1,10 @@
 # Organization-level GCP CDR deploy (SUB-7815). In production the ARMO backend
 # generates this module block for you with these values already filled in.
 #
+# NOTE: this module is provider-less. Wrap it in a root that supplies a
+# `provider "google"` block pinned to the security project (the ARMO backend
+# generates one for you); do not add a provider block to the module itself.
+#
 # Keep access_key OUT of this file — pass it as TF_VAR_access_key instead:
 #   export TF_VAR_access_key='...'
 

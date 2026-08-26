@@ -4,6 +4,10 @@
 # filled in (the GCP analogue of AWS's GenerateCADRStackLink). Copy to
 # terraform.tfvars and edit for a manual/test run.
 #
+# NOTE: this module is provider-less. Wrap it in a root that supplies a
+# `provider "google"` block (the ARMO backend generates one for you); do not add a
+# provider block to the module itself. See the repo README for a minimal root.
+#
 # ⚠️ Do NOT commit a real access_key. Prefer `export TF_VAR_access_key=...` over putting
 #    it in this file. terraform.tfvars is git-ignored (see .gitignore).
 

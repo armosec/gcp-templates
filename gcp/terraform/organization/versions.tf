@@ -17,11 +17,14 @@ terraform {
   }
 }
 
-# The provider is pinned to the SECURITY project: every resource this root creates
-# lives there. The org/folder sinks are the exception — they are org- and
-# folder-scoped resources and take their scope from their own arguments, not from
-# the provider's project.
-provider "google" {
-  project = var.security_project
-  region  = var.region
-}
+# No `provider "google"` block here by design: this is consumed as a CHILD module.
+# The ARMO backend wraps it in a generated root that supplies the provider; for a
+# direct/manual run, wrap it in your own root that does the same (see the repo
+# README). Declaring a provider inside the module re-triggers Terraform's "Provider
+# configuration within modules is not recommended" warning and makes
+# `terraform destroy` fragile, so the provider is configured by the CALLER instead.
+#
+# NOTE for the caller: pin the provider to the SECURITY project (var.security_project)
+# - every resource this module creates lives there. The org/folder sinks are the
+# exception: they are org- and folder-scoped and take their scope from their own
+# arguments, not from the provider's project.
