@@ -20,7 +20,7 @@ variable "region" {
 
 variable "collector_image_ref" {
   type        = string
-  description = "Fully-qualified collector image ref (e.g. quay.io/armosec/cdr-gcp:v0.1.0). Built by G4/SUB-7813 — a parameter until then."
+  description = "Fully-qualified collector image ref (e.g. us-docker.pkg.dev/elated-pottery-310110/armosec-public/cdr-gcp:gcp-v0.0.1). Tagged `gcp-v<x.y.z>` by the release pipeline — a parameter so the deploy pins an explicit version."
 }
 
 variable "customer_guid" {
