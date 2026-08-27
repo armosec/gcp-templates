@@ -18,7 +18,9 @@ terraform {
   }
 }
 
-provider "google" {
-  project = var.project_id
-  region  = var.region
-}
+# No `provider "google"` block here by design: this is consumed as a CHILD module.
+# The ARMO backend wraps it in a generated root that supplies the provider; for a
+# direct/manual run, wrap it in your own root that does the same (see the repo
+# README). Declaring a provider inside the module re-triggers Terraform's "Provider
+# configuration within modules is not recommended" warning and makes
+# `terraform destroy` fragile, so the provider is configured by the CALLER instead.

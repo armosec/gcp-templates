@@ -66,7 +66,7 @@ variable "include_folders" {
 # ---- shared G0 contract values ----------------------------------------------
 variable "collector_image_ref" {
   type        = string
-  description = "Fully-qualified collector image ref (e.g. quay.io/armosec/cdr-gcp:v0.1.0)."
+  description = "Fully-qualified collector image ref (e.g. us-docker.pkg.dev/elated-pottery-310110/armosec-public/cdr-gcp:gcp-v0.0.1). Tagged `gcp-v<x.y.z>` by the release pipeline."
 }
 
 variable "customer_guid" {

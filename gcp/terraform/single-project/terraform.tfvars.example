@@ -4,6 +4,10 @@
 # filled in (the GCP analogue of AWS's GenerateCADRStackLink). Copy to
 # terraform.tfvars and edit for a manual/test run.
 #
+# NOTE: this module is provider-less. Wrap it in a root that supplies a
+# `provider "google"` block (the ARMO backend generates one for you); do not add a
+# provider block to the module itself. See the repo README for a minimal root.
+#
 # ⚠️ Do NOT commit a real access_key. Prefer `export TF_VAR_access_key=...` over putting
 #    it in this file. terraform.tfvars is git-ignored (see .gitignore).
 
@@ -11,7 +15,7 @@
 project_id      = "my-gcp-project"                       # project to onboard
 customer_guid   = "00000000-0000-0000-0000-000000000000" # ARMO tenant GUID
 access_key         = "REPLACE_ME"                            # per-tenant key (or use TF_VAR_access_key)
-collector_image_ref = "quay.io/armosec/cdr-gcp:v0.1.0"        # G4/SUB-7813 image ref
+collector_image_ref = "us-docker.pkg.dev/elated-pottery-310110/armosec-public/cdr-gcp:gcp-v0.0.1"    # gcp-v<x.y.z>, see gcp-release.yaml
 
 # ---- optional (sensible defaults) -------------------------------------------
 region            = "us-central1"

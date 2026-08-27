@@ -1,6 +1,10 @@
 # Organization-level GCP CDR deploy (SUB-7815). In production the ARMO backend
 # generates this module block for you with these values already filled in.
 #
+# NOTE: this module is provider-less. Wrap it in a root that supplies a
+# `provider "google"` block pinned to the security project (the ARMO backend
+# generates one for you); do not add a provider block to the module itself.
+#
 # Keep access_key OUT of this file — pass it as TF_VAR_access_key instead:
 #   export TF_VAR_access_key='...'
 
@@ -9,7 +13,7 @@ security_project = "my-security-project"
 region           = "us-central1"
 
 customer_guid       = "00000000-0000-0000-0000-000000000000"
-collector_image_ref = "quay.io/armosec/cdr-gcp:v0.1.0"
+collector_image_ref = "us-docker.pkg.dev/elated-pottery-310110/armosec-public/cdr-gcp:gcp-v0.0.1"    # gcp-v<x.y.z>, see gcp-release.yaml
 
 # Whole-org coverage (every current AND future child project) when omitted or
 # empty. To scope to specific folders instead, list them — one sink is created per
