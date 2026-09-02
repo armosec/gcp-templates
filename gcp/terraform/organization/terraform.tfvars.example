@@ -15,12 +15,9 @@ region           = "us-central1"
 customer_guid       = "00000000-0000-0000-0000-000000000000"
 collector_image_ref = "us-docker.pkg.dev/elated-pottery-310110/armosec-public/cdr-gcp:gcp-v0.0.1"    # gcp-v<x.y.z>, see gcp-release.yaml
 
-# Whole-org coverage (every current AND future child project) when omitted or
-# empty. To scope to specific folders instead, list them — one sink is created per
-# entry, and coverage is bounded to those folders' projects. "Excluding" a folder
-# means simply not listing it: a log entry carries no folder ancestry, so folder
-# exclusion is not expressible as a sink filter.
-# include_folders = ["folders/111111111111", "folders/222222222222"]
+# Coverage is always whole-organization: every current AND future child project.
+# There is no folder scoping — excluded projects are dropped server-side at
+# ingestion by the backend's account exclude list (ADR 0016), not by this module.
 
 # alert_export_url  = "https://report.armo.cloud/cloud/v1/cdrAlert"
 # rule_endpoint_url = "https://report.armo.cloud/cloud/v1/cdrRules"

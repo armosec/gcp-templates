@@ -40,8 +40,8 @@ Consumers pin either a **published version tag** (`?ref=v0.1.0`) or an immutable
 - `gcp/terraform/single-project/` — account-level (single project) CDR collector module: Pub/Sub topic
   + DLQ + OIDC push subscription, Cloud Run collector + service accounts + least-privilege IAM, the
   project Log Router sink, and the retried D2 connectivity probe.
-- `gcp/terraform/organization/` — organization-level module: aggregated org (or per-folder) sink into a
-  central security project.
+- `gcp/terraform/organization/` — organization-level module: aggregated whole-org sink (include_children)
+  into a central security project.
 - `gcp/terraform/modules/collector-stack/` — the scope-independent core both modules reuse.
 - `gcp/scripts/connectivity-check.sh` — the D2 probe invoked by the modules' `local-exec` (relative
   path `../../scripts/connectivity-check.sh`), so the directory layout is preserved verbatim.

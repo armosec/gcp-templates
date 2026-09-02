@@ -1,17 +1,21 @@
 # =============================================================================
 # "Deploy to GCP" — organization level (FR-O7 / HLD §4.2)
 #
-#   Admin Activity logs, every covered project
-#     └─▶ aggregated org sink  (include_children)   ─┐
-#         or one folder sink per included folder     │  (this file)
+#   Admin Activity logs, every project in the organization
+#     └─▶ aggregated org sink  (include_children)   ─┐   (this file)
 #                                                    ▼
 #         Pub/Sub topic ─▶ OIDC push sub ─▶ Cloud Run collector   (module)
 #              (all inside the SECURITY project)
 #
+# Coverage is ALWAYS whole-organization: one aggregated org sink with
+# include_children. Scope is NOT narrowed here — excluded projects are dropped
+# server-side at ingestion by the backend's account exclude list (matched on the
+# event's project id), never by omitting a sink. See ADR 0016.
+#
 # The scope-independent core lives in the collector-stack module — the same one
-# the single-project root uses. This root adds only the scope-specific piece: the
-# log sink(s), whose resource type, scope argument and writer-identity shape all
-# differ from a project sink.
+# the single-project root uses. This root adds only the org log sink, whose
+# resource type, scope argument and writer-identity shape differ from a project
+# sink.
 # =============================================================================
 
 module "collector" {
@@ -43,16 +47,6 @@ module "collector" {
 }
 
 locals {
-  # Whole-org coverage vs folder-scoped coverage. These are mutually exclusive:
-  # the connection model is "one sink per covered scope", never an org sink plus
-  # filter gymnastics (HLD §4.2, POC-corrected).
-  scope_is_whole_org = length(var.include_folders) == 0
-
-  # Normalize to the bare numeric ID. The backend renders "folders/N", but the
-  # provider's `folder` argument accepts either form, and keying for_each on the
-  # bare ID keeps the state addresses stable if the input form ever changes.
-  folder_ids = [for f in var.include_folders : replace(f, "folders/", "")]
-
   # Admin Activity only (HLD §3.2): always on, free, non-deletable. Data Access
   # logs are deliberately out of scope (high-volume, opt-in — FR-C2).
   sink_filter = "logName:\"logs/cloudaudit.googleapis.com%2Factivity\""
@@ -66,8 +60,6 @@ locals {
 # It also covers projects created LATER, with no re-onboarding — the FR-O7
 # headline.
 resource "google_logging_organization_sink" "activity" {
-  count = local.scope_is_whole_org ? 1 : 0
-
   name             = "${var.name_prefix}-activity-sink"
   org_id           = var.organization_id
   destination      = local.destination
@@ -75,53 +67,40 @@ resource "google_logging_organization_sink" "activity" {
   include_children = true
 }
 
-# ---- Log Router sinks: one per included folder -------------------------------
-# Folder scoping REQUIRES folder-level sinks. It cannot be expressed as a filter
-# on an org-wide sink: log entries carry no folder ancestry, so no filter can say
-# "only folder X" — you would have to enumerate that folder's projects, which
-# breaks the moment one is added. Scoping by inclusion (a sink per covered folder,
-# each with include_children) is the mechanism that actually works, and it was
-# POC-validated as genuinely bounded: a project outside the folder leaked 0 events.
-resource "google_logging_folder_sink" "activity" {
-  for_each = local.scope_is_whole_org ? toset([]) : toset(local.folder_ids)
-
-  name             = "${var.name_prefix}-activity-sink"
-  folder           = each.value
-  destination      = local.destination
-  filter           = local.sink_filter
-  include_children = true
-}
-
-# ---- Grant each sink's writer identity publisher on the topic ----------------
+# ---- Grant the sink's writer identity publisher on the topic -----------------
 # THE SILENT-FAILURE TRAP. A sink's writer identity has a DIFFERENT shape per
 # scope:
 #
 #   project → service-<PROJECT_NUMBER>@gcp-sa-logging.iam.gserviceaccount.com
 #   org     → service-org-<ORG_ID>@gcp-sa-logging.iam.gserviceaccount.com
-#   folder  → service-folder-<FOLDER_ID>@gcp-sa-logging.iam.gserviceaccount.com
 #
 # Granting the wrong shape fails SILENTLY — no error, simply no logs ever arrive,
 # and GCP's own sink metrics do not report it either (POC: exports/error_count
-# stayed empty through ~11 dropped entries). Reading each sink's exported
+# stayed empty through ~11 dropped entries). Reading the sink's exported
 # writer_identity rather than constructing the string is what makes this
 # impossible to get wrong. The identity does not exist until the sink is created,
 # so it cannot be pre-created; ordering is topic (module) → sink → grant.
 resource "google_pubsub_topic_iam_member" "org_sink_writer" {
-  count = local.scope_is_whole_org ? 1 : 0
-
   project = var.security_project
   topic   = module.collector.topic_name
   role    = "roles/pubsub.publisher"
-  member  = google_logging_organization_sink.activity[0].writer_identity
+  member  = google_logging_organization_sink.activity.writer_identity
 }
 
-resource "google_pubsub_topic_iam_member" "folder_sink_writer" {
-  for_each = google_logging_folder_sink.activity
+# ---- State moves: the org sink + its grant were previously count-gated -------
+# The whole-org sink and its publisher grant used to be `count`-gated on
+# scope_is_whole_org, so a live whole-org connection holds them at address
+# `[0]`. Dropping the count changed the address to the unindexed resource; these
+# moved blocks let `terraform apply` re-key in place instead of destroy+recreate
+# (which would briefly stop log routing). No-op when nothing is in state.
+moved {
+  from = google_logging_organization_sink.activity[0]
+  to   = google_logging_organization_sink.activity
+}
 
-  project = var.security_project
-  topic   = module.collector.topic_name
-  role    = "roles/pubsub.publisher"
-  member  = each.value.writer_identity
+moved {
+  from = google_pubsub_topic_iam_member.org_sink_writer[0]
+  to   = google_pubsub_topic_iam_member.org_sink_writer
 }
 
 # ---- D2 connectivity check (retried) — HLD §4.4 -----------------------------
@@ -131,10 +110,8 @@ resource "google_pubsub_topic_iam_member" "folder_sink_writer" {
 # traverses the pipe and proves it end-to-end.
 #
 # NOTE: the security project must be in scope for this to work. Under whole-org
-# coverage it always is. Under FOLDER scoping it only is if the security project
-# sits inside one of the included folders — otherwise the probe generates an event
-# no sink routes, and the check cannot confirm the pipe. See the caveat in
-# outputs.tf and the org section of the README.
+# coverage it always is (the org sink covers every child project), so the probe
+# event is always routed.
 resource "null_resource" "connectivity_check" {
   count = var.run_connectivity_check ? 1 : 0
 
@@ -155,10 +132,9 @@ resource "null_resource" "connectivity_check" {
     EOT
   }
 
-  # Only fire once the whole pipe — including every sink→topic grant — is in place.
+  # Only fire once the whole pipe — including the sink→topic grant — is in place.
   depends_on = [
     module.collector,
     google_pubsub_topic_iam_member.org_sink_writer,
-    google_pubsub_topic_iam_member.folder_sink_writer,
   ]
 }
