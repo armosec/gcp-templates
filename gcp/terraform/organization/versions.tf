@@ -25,6 +25,5 @@ terraform {
 # `terraform destroy` fragile, so the provider is configured by the CALLER instead.
 #
 # NOTE for the caller: pin the provider to the SECURITY project (var.security_project)
-# - every resource this module creates lives there. The org/folder sinks are the
-# exception: they are org- and folder-scoped and take their scope from their own
-# arguments, not from the provider's project.
+# - every resource this module creates lives there. The org sink is the exception:
+# it is org-scoped and takes its scope from org_id, not from the provider's project.

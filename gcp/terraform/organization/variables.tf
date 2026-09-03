@@ -2,11 +2,12 @@
 # "Deploy to GCP" — organization root module (SUB-7815, HLD §4.2)
 #
 # THE G0 INTERFACE CONTRACT. These names are NOT free to rename: cadashboardbe's
-# renderGcpTerraformModule emits exactly `organization_id`, `security_project`,
-# `region` and `include_folders` for an org connection, alongside the shared
-# customer_guid / collector_image_ref / alert_export_url / rule_endpoint_url /
-# name_prefix / access_key. A rename here silently produces a generated artifact
-# that fails to apply in the customer's shell.
+# renderGcpTerraformModule emits exactly `organization_id`, `security_project`
+# and `region` for an org connection, alongside the shared customer_guid /
+# collector_image_ref / alert_export_url / rule_endpoint_url / name_prefix /
+# access_key. A rename here silently produces a generated artifact that fails to
+# apply in the customer's shell. (Coverage is always whole-organization; excluded
+# projects are filtered server-side at ingestion, not by this module — ADR 0016.)
 # =============================================================================
 
 variable "organization_id" {
@@ -36,31 +37,6 @@ variable "region" {
   type        = string
   description = "Region for the Cloud Run collector and Pub/Sub resources."
   default     = "us-central1"
-}
-
-variable "include_folders" {
-  type        = list(string)
-  description = <<-EOT
-    Folders to scope coverage to, as resource names ("folders/123456789012") —
-    the form the backend renders from the bare IDs in CADRGcpConfig.
-
-    EMPTY (the default) means WHOLE-ORG coverage: one aggregated organization sink
-    with include_children, covering every current and future child project.
-
-    Non-empty means one FOLDER sink per entry instead of the org sink. This is the
-    only way to scope by folder: a log entry carries no folder ancestry, so no sink
-    filter can express "exclude folder X" — coverage is expressed as one sink per
-    covered scope. Excluding a folder therefore means simply not listing it.
-
-    Note the scale implication: whole-org coverage duplicates EVERY child
-    project's audit stream into this topic. The sink set is the only containment.
-  EOT
-  default     = []
-
-  validation {
-    condition     = alltrue([for f in var.include_folders : can(regex("^(folders/)?[0-9]{1,20}$", f))])
-    error_message = "each include_folders entry must be a numeric folder ID, optionally prefixed with \"folders/\"."
-  }
 }
 
 # ---- shared G0 contract values ----------------------------------------------

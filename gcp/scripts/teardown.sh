@@ -21,14 +21,11 @@
 # NOT guarantee that ordering — fine for a test/dormant project, not a live one.
 #
 # SCOPES. --project alone offboards an ACCOUNT-level connection (project sink).
-# For an ORGANIZATION-level connection also pass --organization-id, and
-# --include-folders if the connection was folder-scoped, so the org/folder sinks
-# are deleted rather than silently left behind:
+# For an ORGANIZATION-level connection also pass --organization-id, so the org
+# sink is deleted rather than silently left behind:
 #
-#   account:            --project my-project
-#   org, whole-org:     --project my-security-project --organization-id 123456789012
-#   org, folder-scoped: --project my-security-project --organization-id 123456789012 \
-#                         --include-folders 111111111111,222222222222
+#   account:  --project my-project
+#   org:      --project my-security-project --organization-id 123456789012
 #
 # --project always names the project holding the topic/subscription/collector: the
 # onboarded project at account level, the SECURITY project at org level.
@@ -39,13 +36,12 @@ PROJECT_ID="${PROJECT_ID:-}"
 REGION="${REGION:-us-central1}"
 NAME_PREFIX="${NAME_PREFIX:-armo-cdr}"
 SINK_DRAIN_SECONDS="${SINK_DRAIN_SECONDS:-180}"
-# Organization-level offboarding. An org connection's sinks are NOT project sinks:
-# they live at the organization (or at each included folder) and must be deleted
-# with --organization / --folder. A project-scoped delete simply does not see them,
-# so an org teardown that omits these leaves the sinks in place, still routing
-# every covered project's audit stream at a topic that is about to be deleted.
+# Organization-level offboarding. An org connection's sink is NOT a project sink:
+# it lives at the organization and must be deleted with --organization. A
+# project-scoped delete simply does not see it, so an org teardown that omits
+# --organization-id leaves the sink in place, still routing every covered
+# project's audit stream at a topic that is about to be deleted.
 ORGANIZATION_ID="${ORGANIZATION_ID:-}"
-INCLUDE_FOLDERS="${INCLUDE_FOLDERS:-}"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -54,7 +50,6 @@ while [[ $# -gt 0 ]]; do
     --name-prefix) NAME_PREFIX="$2"; shift 2 ;;
     --drain-seconds) SINK_DRAIN_SECONDS="$2"; shift 2 ;;
     --organization-id) ORGANIZATION_ID="$2"; shift 2 ;;
-    --include-folders) INCLUDE_FOLDERS="$2"; shift 2 ;;
     *) echo "unknown arg: $1" >&2; exit 2 ;;
   esac
 done
@@ -73,44 +68,15 @@ SECRET="${NAME_PREFIX}-access-key"
 gcloud config set project "$PROJECT_ID" >/dev/null
 
 # Build the list of sink scopes to delete. Exactly mirrors what the deploy created:
-#   account level      -> one project sink
-#   org, whole-org     -> one organization sink
-#   org, folder-scoped -> one sink per included folder
+#   account level -> one project sink
+#   org level     -> one organization sink
 # Each entry is a gcloud scope flag, applied to the same sink NAME (the deploy uses
 # one name across scopes).
-# --include-folders only means something for an org connection. Accepting it with a
-# bare --project would silently fall through to project scope and leave the org or
-# folder sinks in place — still routing into a topic this script is about to delete,
-# which is exactly the "topic_not_found" owner email we order the teardown to avoid.
-if [[ -n "$INCLUDE_FOLDERS" && -z "$ORGANIZATION_ID" ]]; then
-  echo "--include-folders requires --organization-id (it scopes an ORGANIZATION connection)." >&2
-  echo "For an account-level teardown pass only --project." >&2
-  exit 2
-fi
-
 SINK_SCOPES=()
 if [[ -n "$ORGANIZATION_ID" ]]; then
-  if [[ -n "$INCLUDE_FOLDERS" ]]; then
-    IFS=',' read -r -a _folders <<< "$INCLUDE_FOLDERS"
-    for f in "${_folders[@]}"; do
-      f="${f// /}"; f="${f#folders/}"        # accept "folders/N", "N", and spaced lists
-      [[ -n "$f" ]] && SINK_SCOPES+=("--folder=$f")
-    done
-  else
-    SINK_SCOPES+=("--organization=$ORGANIZATION_ID")
-  fi
+  SINK_SCOPES+=("--organization=$ORGANIZATION_ID")
 else
   SINK_SCOPES+=("--project=$PROJECT_ID")
-fi
-
-# Guard against an empty scope list. A value like ",," or " " strips to nothing, and
-# every entry being skipped would leave SINK_SCOPES empty — the deletion loops below
-# would then iterate zero times and the script would sail on to delete the topic with
-# the sinks still attached. Fail instead of silently skipping the most important step.
-if [[ ${#SINK_SCOPES[@]} -eq 0 ]]; then
-  echo "no sink scope could be derived from the arguments (--include-folders '${INCLUDE_FOLDERS}')." >&2
-  echo "Refusing to continue: deleting the topic while its sinks still exist emails the project owner." >&2
-  exit 2
 fi
 
 echo "== 1. Delete the Log Router sink(s) FIRST (stops new logs flowing) =="
